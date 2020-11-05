@@ -1,0 +1,81 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+
+my $gcodefile = shift;
+@ARGV == 0 or usage();
+
+my $gcode = slurp($gcodefile);
+
+while (<>) {
+    chomp;
+
+    my ($x, $y, $z) = split /\s/;
+
+    $z //= 0;
+
+    print "(gcodetile: offset $x,$y,$z)\n";
+    print offset_gcode($gcode, $x, $y, $z);
+}
+
+sub offset_gcode {
+    my ($gcode, $x, $y, $z) = @_;
+
+    my $relative = 0;
+
+    my @lines = split /\n/, $gcode;
+    for my $l (@lines) {
+        if ($l =~ /^\s*\(/) { # leave comments alone
+            print $l;
+        } else { # process g-code
+            while ($l =~ /([A-Z])([0-9.-]+)(\s*)/g) {
+                my ($letter, $arg, $space) = ($1, $2, $3);
+                $relative = 0 if $letter eq 'G' && $arg == 90;
+                $relative = 1 if $letter eq 'G' && $arg == 91;
+
+                $arg += $x if !$relative && $letter eq 'X';
+                $arg += $y if !$relative && $letter eq 'Y';
+                $arg += $z if !$relative && $letter eq 'Z';
+
+                print "$letter$arg$space";
+            }
+            # TODO: print rest of $l from pos($l) to end, if any?
+        }
+        print "\n";
+    }
+}
+
+sub usage {
+    print qq{usage: gcodetile GCODEFILE < OFFSETS
+
+Give OFFSETS on stdin in the form "X Y" or "X Y Z", one per line, ending
+at EOF, for example:
+
+$ gcodetile part.gcode
+0 0
+0 10
+0 20
+10 0
+10 10
+10 20
+^D
+
+gcodetile is created by James Stanley. You can email me on james\@incoherency.co.uk
+or read my blog at https://incoherency.co.uk/
+};
+    exit 0;
+}
+
+sub slurp {
+    my ($file) = @_;
+
+    open (my $fh, '<', $file)
+        or die "can't read $file: $!\n";
+    my $c = join('', <$fh>);
+    close $fh;
+
+    return $c;
+}
