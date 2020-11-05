@@ -54,7 +54,7 @@ sub usage {
 Give OFFSETS on stdin in the form "X Y" or "X Y Z", one per line, ending
 at EOF, for example:
 
-$ gcodetile part.gcode
+\$ gcodetile part.gcode
 0 0
 0 10
 0 20
