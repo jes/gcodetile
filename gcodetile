@@ -40,6 +40,11 @@ sub offset_gcode {
                 $arg += $y if !$relative && $letter eq 'Y';
                 $arg += $z if !$relative && $letter eq 'Z';
 
+                if ($letter eq 'M' && $arg == 2) {
+                    warn "note: removing M2 (Program End)\n";
+                    next;
+                }
+
                 print "$letter$arg$space";
             }
             # TODO: print rest of $l from pos($l) to end, if any?
