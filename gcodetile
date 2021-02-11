@@ -4,14 +4,21 @@ use strict;
 use warnings;
 
 use Getopt::Long;
+use List::Util qw(min max);
 
 my $invert_x;
 my $invert_y;
+my $show_bounds;
 
 GetOptions(
     'invert-x' => \$invert_x,
     'invert-y' => \$invert_y,
+    'show-bounds' => \$show_bounds,
 ) or usage();
+
+my ($curx, $cury, $curz);
+my ($minx, $miny, $minz);
+my ($maxx, $maxy, $maxz);
 
 my $gcodefile = shift;
 @ARGV == 0 or usage();
@@ -27,6 +34,12 @@ while (<>) {
 
     print "(gcodetile: offset $x,$y,$z)\n";
     print offset_gcode($gcode, $x, $y, $z);
+}
+
+if ($show_bounds) {
+    print STDERR sprintf("X bounds: %.5f .. %.5f\n", $minx, $maxx);
+    print STDERR sprintf("Y bounds: %.5f .. %.5f\n", $miny, $maxy);
+    print STDERR sprintf("Z bounds: %.5f .. %.5f\n", $minz, $maxz);
 }
 
 sub offset_gcode {
@@ -60,6 +73,29 @@ sub offset_gcode {
                 }
 
                 print "$letter$arg$space";
+
+                if ($relative) {
+                    $curx += $arg if $letter eq 'X';
+                    $cury += $arg if $letter eq 'Y';
+                    $curz += $arg if $letter eq 'Z';
+                } else {
+                    $curx = $arg if $letter eq 'X';
+                    $cury = $arg if $letter eq 'Y';
+                    $curz = $arg if $letter eq 'Z';
+                }
+
+                $minx = $curx if !defined $minx;
+                $maxx = $curx if !defined $maxx;
+                $miny = $cury if !defined $miny;
+                $maxy = $cury if !defined $maxy;
+                $minz = $curz if !defined $minz;
+                $maxz = $curz if !defined $maxz;
+                $minx = min($minx, $curx) if defined $minx;
+                $maxx = max($maxx, $curx) if defined $maxx;
+                $miny = min($miny, $cury) if defined $miny;
+                $maxy = max($maxy, $cury) if defined $maxy;
+                $minz = min($minz, $curz) if defined $minz;
+                $maxz = max($maxz, $curz) if defined $maxz;
             }
             # TODO: print rest of $l from pos($l) to end, if any?
         }
@@ -73,6 +109,7 @@ sub usage {
 Options:
   --invert-x     Invert X coordinates from GCODEFILE
   --invert-y     Invert Y coordinates from GCODEFILE
+  --show-bounds  Show bounds of output coordinates on STDERR
 
 Give OFFSETS on stdin in the form "X Y" or "X Y Z", one per line, ending
 at EOF, for example:
