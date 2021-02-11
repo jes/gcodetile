@@ -5,6 +5,14 @@ use warnings;
 
 use Getopt::Long;
 
+my $invert_x;
+my $invert_y;
+
+GetOptions(
+    'invert-x' => \$invert_x,
+    'invert-y' => \$invert_y,
+) or usage();
+
 my $gcodefile = shift;
 @ARGV == 0 or usage();
 
@@ -31,10 +39,16 @@ sub offset_gcode {
         if ($l =~ /^\s*\(/) { # leave comments alone
             print $l;
         } else { # process g-code
-            while ($l =~ /([A-Z])([0-9.-]+)(\s*)/g) {
+            while ($l =~ /([A-Z])([0-9.-]+)(\s*)/gi) {
                 my ($letter, $arg, $space) = ($1, $2, $3);
+                $letter = uc $letter;
                 $relative = 0 if $letter eq 'G' && $arg == 90;
                 $relative = 1 if $letter eq 'G' && $arg == 91;
+
+                warn "warning: can't invert circular motion!\n" if $letter eq 'G' && ($arg == 2 || $arg == 3) && ($invert_x || $invert_y);
+
+                $arg = -$arg if $invert_x && $letter eq 'X';
+                $arg = -$arg if $invert_y && $letter eq 'Y';
 
                 $arg += $x if !$relative && $letter eq 'X';
                 $arg += $y if !$relative && $letter eq 'Y';
@@ -54,7 +68,11 @@ sub offset_gcode {
 }
 
 sub usage {
-    print qq{usage: gcodetile GCODEFILE < OFFSETS
+    print qq{usage: gcodetile [options] GCODEFILE < OFFSETS
+
+Options:
+  --invert-x     Invert X coordinates from GCODEFILE
+  --invert-y     Invert Y coordinates from GCODEFILE
 
 Give OFFSETS on stdin in the form "X Y" or "X Y Z", one per line, ending
 at EOF, for example:
