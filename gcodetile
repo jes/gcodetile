@@ -4,17 +4,25 @@ use strict;
 use warnings;
 
 use Getopt::Long;
+use JSON qw(decode_json);
 use List::Util qw(min max);
 
 my $invert_x;
 my $invert_y;
 my $show_bounds;
+my $swap_xy;
+my $height_file;
 
 GetOptions(
+    'height-file=s' => \$height_file,
     'invert-x' => \$invert_x,
     'invert-y' => \$invert_y,
     'show-bounds' => \$show_bounds,
+    'swap-xy' => \$swap_xy,
 ) or usage();
+
+my $hm;
+$hm = load_heightmap($height_file) if $height_file;
 
 my ($curx, $cury, $curz);
 my ($minx, $miny, $minz);
@@ -60,6 +68,12 @@ sub offset_gcode {
 
                 warn "warning: can't invert circular motion!\n" if $letter eq 'G' && ($arg == 2 || $arg == 3) && ($invert_x || $invert_y);
 
+                if ($letter eq 'X' && $swap_xy) {
+                    $letter = 'Y';
+                } elsif ($letter eq 'Y' && $swap_xy) {
+                    $letter = 'X';
+                }
+
                 $arg = -$arg if $invert_x && $letter eq 'X';
                 $arg = -$arg if $invert_y && $letter eq 'Y';
 
@@ -71,8 +85,6 @@ sub offset_gcode {
                     warn "note: removing M2 (Program End)\n";
                     next;
                 }
-
-                print "$letter$arg$space";
 
                 if ($relative) {
                     $curx += $arg if $letter eq 'X';
@@ -96,20 +108,129 @@ sub offset_gcode {
                 $maxy = max($maxy, $cury) if defined $maxy;
                 $minz = min($minz, $curz) if defined $minz;
                 $maxz = max($maxz, $curz) if defined $maxz;
+
+                next if $hm && $letter eq 'Z';
+
+                print "$letter$arg$space";
             }
+
+            if ($hm && defined $curz && ($l =~ /[XYZ]/i)) {
+                warn "applying heightmaps to relative Z moves is probably unsound\n" if $relative;
+                my $thisz = $curz;
+                $thisz += heightmap_height($hm, $curx, $cury) if defined $curx && defined $cury;
+                print sprintf(" Z%.3f", $thisz);
+            }
+
             # TODO: print rest of $l from pos($l) to end, if any?
         }
         print "\n";
     }
 }
 
+sub heightmap_height {
+    my ($hm, $x, $y) = @_;
+
+    my ($x0, $x1, $y0, $y1);
+
+    # find the square that (x,y) lies inside
+    for my $i (0 .. @{ $hm->{xs} }-2) {
+        $x0 = $hm->{xs}[$i];
+        $x1 = $hm->{xs}[$i+1];
+        last if $x0 <= $x && $x1 >= $x; # x is between x0 and x1
+        last if $x0 > $x; # x is to the left of the smallest x in the grid
+    }
+    for my $i (0 .. @{ $hm->{ys} }-2) {
+        $y0 = $hm->{ys}[$i];
+        $y1 = $hm->{ys}[$i+1];
+        last if $y0 <= $y && $y1 >= $y; # y is between y0 and y1
+        last if $y0 > $y; # y is below the smallest y in the grid
+    }
+
+    # (x0,y0) -> (x1,y1) now describes the square that (x,y) lies inside, or if
+    # (x,y) does not lie inside the grid, it describes the nearest square, and
+    # the maths turns into extrapolation instead of interpolation
+
+    # we want x0 at kx=0 and x1 at kx=1, and interpolate in between
+    my $kx = ($x-$x0) / ($x1-$x0);
+    my $ky = ($y-$y0) / ($y1-$y0);
+
+    # look up the heights at the 4 corners
+    my $z00 = $hm->{height}{"$x0,$y0"};
+    my $z01 = $hm->{height}{"$x0,$y1"};
+    my $z10 = $hm->{height}{"$x1,$y0"};
+    my $z11 = $hm->{height}{"$x1,$y1"};
+
+    # linear-interpolate horizontally at top and bottom edge
+    my $z0 = lerp($z00, $z10, $kx);
+    my $z1 = lerp($z01, $z11, $kx);
+
+    # linear-interpolate vertically
+    my $z = lerp($z0, $z1, $ky);
+
+    return $z;
+}
+
+# linear interpolate between $a and $b;
+# take $a at $k=0 and $b at $k=1
+sub lerp {
+    my ($a, $b, $k) = @_;
+    return ($k*$b)+((1-$k)*$a);
+}
+
+sub load_heightmap {
+    my ($file) = @_;
+
+    # load the UGS Platform heightmap
+    open(my $fh, '<', $file)
+        or die "can't read $file: $!\n";
+    my $c = join('',<$fh>);
+    close $fh;
+
+    my $data = decode_json($c);
+
+    my %xs;
+    my %ys;
+    my %height;
+    for my $p (@$data) {
+        $xs{$p->{x}} = 1;
+        $ys{$p->{y}} = 1;
+        $height{"$p->{x},$p->{y}"} = $p->{z};
+    }
+
+    my $ok = 1;
+    for my $x (keys %xs) {
+        for my $y (keys %ys) {
+            if (!exists $height{"$x,$y"}) {
+                warn "missing point: x=$x,y=$y\n";
+                $ok = 0;
+            }
+        }
+    }
+    exit(1) if !$ok;
+
+    my @xs = sort keys %xs;
+    my @ys = sort keys %ys;
+
+    return {
+        xs => \@xs,
+        ys => \@ys,
+        height => \%height,
+    };
+}
+
 sub usage {
     print qq{usage: gcodetile [options] GCODEFILE < OFFSETS
 
 Options:
-  --invert-x     Invert X coordinates from GCODEFILE
-  --invert-y     Invert Y coordinates from GCODEFILE
-  --show-bounds  Show bounds of output coordinates on STDERR
+  --height-file FILE  Offset Z coordinates using height map
+  --invert-x          Invert X coordinates from GCODEFILE
+  --invert-y          Invert Y coordinates from GCODEFILE
+  --show-bounds       Show bounds of output coordinates on STDERR
+
+If --height-file, HEIGHTFILE should be a JSON file containing a height map as
+produced by UGS Platform. It should be a grid of points, and the JSON should
+be of the form:
+    [ { "x":0,"y":0,"z":0 }, {"x":5,"y":5,"z":-0.1}, ... ]
 
 Give OFFSETS on stdin in the form "X Y" or "X Y Z", one per line, ending
 at EOF, for example:
