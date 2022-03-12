@@ -12,6 +12,7 @@ my $invert_y;
 my $show_bounds;
 my $swap_xy;
 my $height_file;
+my $scale_y;
 
 GetOptions(
     'height-file=s' => \$height_file,
@@ -19,6 +20,7 @@ GetOptions(
     'invert-y' => \$invert_y,
     'show-bounds' => \$show_bounds,
     'swap-xy' => \$swap_xy,
+    'scale-y=f' => \$scale_y,
 ) or usage();
 
 my $hm;
@@ -28,7 +30,7 @@ my ($curx, $cury, $curz);
 my ($minx, $miny, $minz);
 my ($maxx, $maxy, $maxz);
 
-my $gcodefile = shift;
+my $gcodefile = shift // usage();
 @ARGV == 0 or usage();
 
 my $gcode = slurp($gcodefile);
@@ -72,6 +74,10 @@ sub offset_gcode {
                     $letter = 'Y';
                 } elsif ($letter eq 'Y' && $swap_xy) {
                     $letter = 'X';
+                }
+
+                if ($letter eq 'Y' && defined $scale_y) {
+                    $arg *= $scale_y; # TODO: also scale feedrates
                 }
 
                 $arg = -$arg if $invert_x && $letter eq 'X';
@@ -226,6 +232,8 @@ Options:
   --invert-x          Invert X coordinates from GCODEFILE
   --invert-y          Invert Y coordinates from GCODEFILE
   --show-bounds       Show bounds of output coordinates on STDERR
+  --swap-xy           Swap X and Y coordinates
+  --scale-y FACTOR    Scale input Y coordinates by FACTOR
 
 If --height-file, HEIGHTFILE should be a JSON file containing a height map as
 produced by UGS Platform. It should be a grid of points, and the JSON should
