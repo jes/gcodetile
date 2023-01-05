@@ -57,8 +57,11 @@ sub offset_gcode {
 
     my $relative = 0;
 
+    my $is_arc_move;
+
     my @lines = split /\n/, $gcode;
     for my $l (@lines) {
+        $is_arc_move = 0;
         if ($l =~ /^\s*\(/) { # leave comments alone
             print $l;
         } else { # process g-code
@@ -68,7 +71,16 @@ sub offset_gcode {
                 $relative = 0 if $letter eq 'G' && $arg == 90;
                 $relative = 1 if $letter eq 'G' && $arg == 91;
 
-                warn "warning: can't invert circular motion!\n" if $letter eq 'G' && ($arg == 2 || $arg == 3) && ($invert_x || $invert_y);
+                $is_arc_move = 1 if $letter eq 'G' && ($arg == 2 || $arg == 3);
+
+                if ($letter eq 'G' && ($arg == 2 || $arg == 3) && ($invert_x || $invert_y)) {
+                    warn "warning: inversion of circular motion may be broken!\n";
+
+                    $arg = ($arg == 2 ? 3 : 2) if $invert_x;
+                    $arg = ($arg == 2 ? 3 : 2) if $invert_y;
+                }
+                $arg = -$arg if $is_arc_move && $letter eq 'I' && $invert_x;
+                $arg = -$arg if $is_arc_move && $letter eq 'J' && $invert_y;
 
                 if ($letter eq 'X' && $swap_xy) {
                     $letter = 'Y';
